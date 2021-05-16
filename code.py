@@ -4,242 +4,159 @@ import pandas as pd
 # CTRL + / to comment out blocks of code.
 
 ### Display full dataframe columns.
-pd.set_option("display.max_columns", None)
+pd.set_option("display.max_columns", None, "display.max_rows", None)
 
-def import_and_clean_housing_data(path):
+d_train = pd.read_csv("data/D_train.csv", index_col="index")
+x_test = pd.read_csv("data/X_test.csv", index_col="index")
 
-	### Importing raw data.
-	data_raw = pd.read_csv('data/X_test.csv',\
-							index_col="index",\
-							dtype = {'MS_SubClass': 'category',\
-									'MS_Zoning': 'category',\
-									'Street': 'category',\
-									'Alley': 'category',\
-									'Lot_Shape': 'category',\
-									'Land_Contour': 'category',\
-									'Utilities': 'category',\
-									'Bldg_Type': 'category',\
-									'House_Style': 'category',\
-									'Overall_Qual': 'category',\
-									'Overall_Cond': 'category',\
-									'Roof_Style': 'category',\
-									'Exter_Qual': 'category',\
-									'Exter_Cond': 'category',\
-									'Foundation': 'category',\
-									'Bsmt_Qual': 'category',\
-									'Bsmt_Cond': 'category',\
-									'Bsmt_Exposure': 'category',\
-									'Heating': 'category',\
-									'Heating_QC': 'category',\
-									'Electrical': 'category',\
-									'Kitchen_Qual': 'category',\
-									'Functional': 'category',\
-									'Fireplace_Qu': 'category',\
-									'Garage_Type': 'category',\
-									'Garage_Qual': 'category',\
-									'Garage_Cond': 'category',\
-									'Paved_Drive': 'category',\
-									'Pool_QC': 'category',\
-									'Fence': 'category',\
-									'Misc_Feature': 'category',\
-									'Sale_Type': 'category',\
-									'Sale_Condition': 'category'})
+# print(d_train.head())
+# print(d_train.isnull().sum())
+# print(d_train.isna().sum())
 
-	# for colname in data_raw:
-	# 	print(data_raw[colname].value_counts())
-	# 	print()
+from features import numeric_features, boolean_feature, categorical_nominal_features, categorical_ordinal_features, categorical_ordinal_features_mappers
 
-	## Pre-processing.
+for i in range(len(categorical_ordinal_features)):
+	d_train[categorical_ordinal_features[i]] = d_train[categorical_ordinal_features[i]].replace(categorical_ordinal_features_mappers[i])
+	x_test[categorical_ordinal_features[i]] = x_test[categorical_ordinal_features[i]].replace(categorical_ordinal_features_mappers[i])
 
-	# print(data_raw.isnull().sum()) NO NULL
-	# print(data_raw.isna().sum()) NO NA
+d_train["Central_Air"] = d_train["Central_Air"].replace({'Y':1, 'N':0})
+x_test["Central_Air"] = x_test["Central_Air"].replace({'Y':1, 'N':0})
 
-	#### Nominal categorical features.
-	from sklearn.preprocessing import OneHotEncoder
-	ohe = OneHotEncoder(dtype=np.int64, sparse=False)
-	data = pd.DataFrame(ohe.fit_transform(data_raw[['MS_SubClass',\
-		'MS_Zoning',\
-		'Street',\
-		'Alley',\
-		'Lot_Shape',\
-		'Land_Contour',\
-		'Utilities',\
-		'Bldg_Type',\
-		'House_Style',\
-		'Roof_Style',\
-		'Foundation',\
-		'Bsmt_Exposure',\
-		'Heating',\
-		'Electrical',\
-		'Functional',\
-		'Garage_Type',\
-		'Paved_Drive',\
-		'Fence',\
-		'Misc_Feature',\
-		'Mo_Sold',\
-		'Sale_Type',\
-		'Sale_Condition']]),index=data_raw.index)
+d_train["Mo_Sold"] = d_train["Mo_Sold"].replace({1:"JAN",2:"FEV",3:"MAR",4:"APR",5:"MAY",6:"JUN",7:"JUL",8:"AUG",9:"SEP",10:"OCT",11:"NOV",12:"DEC"})
+x_test["Mo_Sold"] = x_test["Mo_Sold"].replace({1:"JAN",2:"FEV",3:"MAR",4:"APR",5:"MAY",6:"JUN",7:"JUL",8:"AUG",9:"SEP",10:"OCT",11:"NOV",12:"DEC"})
+d_train_tmp = d_train.copy()
+d_train_tmp['y'] = d_train_tmp['y'].replace({'A':0,'B':1,'C':2,'D':3,'E':4})
+d_train_tmp = pd.get_dummies(d_train_tmp, prefix=categorical_nominal_features)
+
+y_corr = d_train_tmp.corr()['y'].abs().to_dict() #.sort_values(ascending=False)
+
+corrs = {key: corr for key, corr in y_corr.items() if key in numeric_features+boolean_feature+categorical_ordinal_features}
+
+for feature in categorical_nominal_features:
+	occ = d_train[feature].value_counts().to_dict()
+	tmp_sum = 0
+	tmp_len = 0
+	for key, value in occ.items():
+		tmp_len += value
+		tmp_sum += value*y_corr[feature+"_"+key]
+	corrs[feature] = tmp_sum/tmp_len
+
+x_train = d_train.drop("y", axis=1)
+y_train = d_train.y
+
+post_process_numeric_features = numeric_features+boolean_feature+categorical_ordinal_features
+post_process_categorical_features = categorical_nominal_features
+
+def build_and_score_model(	func,\
+							numeric_features=[],\
+							categorical_features=[],\
+							export_path="output/tmp.csv",\
+							folds=10, 
+							to_dense=False):
+
+	from sklearn.pipeline import Pipeline
+	from sklearn.impute import SimpleImputer
+	from sklearn.preprocessing import StandardScaler, OneHotEncoder
+
+	numeric_transformer = Pipeline(steps=[
+	    ('imputer', SimpleImputer(strategy='median')),
+	    ('scaler', StandardScaler())])
+
+	categorical_nominal_transformer = OneHotEncoder(handle_unknown='ignore')
 
 
-	data.columns = ohe.get_feature_names(['MS_SubClass',\
-		'MS_Zoning',\
-		'Street',\
-		'Alley',\
-		'Lot_Shape',\
-		'Land_Contour',\
-		'Utilities',\
-		'Bldg_Type',\
-		'House_Style',\
-		'Roof_Style',\
-		'Foundation',\
-		'Bsmt_Exposure',\
-		'Heating',\
-		'Electrical',\
-		'Functional',\
-		'Garage_Type',\
-		'Paved_Drive',\
-		'Fence',\
-		'Misc_Feature',\
-		'Mo_Sold',\
-		'Sale_Type',\
-		'Sale_Condition']) #https://stackoverflow.com/a/55206934
+	if to_dense == True:
+		categorical_nominal_transformer = Pipeline(steps=[
+			('onehot', OneHotEncoder(handle_unknown='ignore')),
+			('to_dense', DenseTransformer())])
 
-	data_raw = data_raw.drop(['MS_SubClass',\
-		'MS_Zoning',\
-		'Street',\
-		'Alley',\
-		'Lot_Shape',\
-		'Land_Contour',\
-		'Utilities',\
-		'Bldg_Type',\
-		'House_Style',\
-		'Roof_Style',\
-		'Foundation',\
-		'Bsmt_Exposure',\
-		'Heating',\
-		'Electrical',\
-		'Functional',\
-		'Garage_Type',\
-		'Paved_Drive',\
-		'Fence',\
-		'Misc_Feature',\
-		'Mo_Sold',\
-		'Sale_Type',\
-		'Sale_Condition'], axis=1) #Remove features from raw data set.
+	from sklearn.compose import ColumnTransformer
+
+	preprocessor = ColumnTransformer(
+    transformers=[
+        ('num', numeric_transformer, numeric_features),
+        ('cat', categorical_nominal_transformer, categorical_features)])
+
+	model = Pipeline(steps=[('preprocessor', preprocessor),
+                    ('classifier', func)])
+
+	from sklearn.model_selection import cross_validate
+
+	model.fit(x_train, y_train)
+
+	cv_results = cross_validate(model, x_train, y_train, scoring='neg_log_loss', n_jobs=4, cv=folds)
+
+	pred_prob_test = pd.DataFrame(model.predict_proba(x_test))
+	pred_prob_test.set_index(x_test.index, inplace = True)
+	pred_prob_test.reset_index(inplace=True)
+	pred_prob_test.rename(columns = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E'}, inplace = True)
+	pred_prob_test.to_csv(export_path, index = False)
+
+	return -(sum(cv_results["test_score"])/len(cv_results["test_score"]))
+
+from sklearn.base import TransformerMixin
+
+class DenseTransformer(TransformerMixin): #https://stackoverflow.com/a/28384887
+
+    def fit(self, X, y=None, **fit_params):
+        return self
+
+    def transform(self, X, y=None, **fit_params):
+        return X.todense()
 
 
-	#### Ordinal categorical features.
-	# for colname in data_raw.columns:
-	# 	print(data_raw[colname].value_counts())
-	# 	print()
+def test_in_correlation_order(func, i_min=0):
+	import os
 
-	#Overall_Qual
-	ordinals_Overall_Qual= pd.Categorical(data_raw.Overall_Qual,\
-								categories=['Very_Poor','Poor','Below_Average','Average','Above_Average','Fair','Good','Very_Good','Excellent','Very_Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Overall_Qual, sort=True)
-	data['Overall_Qual']=labels
+	best = 100
+	most_correlated_features = []
+	i=0
+	for k, v in sorted(corrs.items(), key=lambda x: -x[1]):
+		most_correlated_features.append(k)
+		i+=1
+		if i>i_min:
+			numeric_subset = [str(f) for f in most_correlated_features if f in post_process_numeric_features]
+			nominal_subset = [str(f) for f in most_correlated_features if f in post_process_categorical_features]
+			tmp = build_and_score_model(func, numeric_features=numeric_subset, categorical_features=nominal_subset)
 
-	#Overall_Cond
-	ordinals_Overall_Cond= pd.Categorical(data_raw.Overall_Cond,\
-								categories=['Very_Poor','Poor','Below_Average','Average','Above_Average','Fair','Good','Very_Good','Excellent','Very_Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Overall_Cond, sort=True)
-	data['Overall_Cond']=labels
+			if tmp<best:
+				best=tmp
+				print("==========")
+				print("New best prediction using "+str(len(most_correlated_features))+" features.")
+				print("Multiclass log loss score on training set : "+str(best))
+				print(numeric_subset+nominal_subset)
+				os.rename('output/tmp.csv', 'output/current_best_corr.csv')
 
-	#Exter_Qual
-	ordinals_Exter_Qual= pd.Categorical(data_raw.Exter_Qual,\
-								categories=['Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Exter_Qual, sort=True)
-	data['Exter_Qual']=labels
+def test_random_weighted_combinations(func):
+	import random
+	import os
 
-	#Exter_Cond
-	ordinals_Exter_Cond= pd.Categorical(data_raw.Exter_Cond,\
-								categories=['Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Exter_Cond, sort=True)
-	data['Exter_Cond']=labels
+	best = 100
+	total_feature_length = len(post_process_numeric_features)+len(post_process_categorical_features)
+	total_feature_list = post_process_numeric_features+post_process_categorical_features
+	weights = []
+	for feature in total_feature_list:
+		weights.append(corrs[feature])
+	weights_p = [w/sum(weights) for w in weights]
 
-	#Bsmt_Qual
-	ordinals_Bsmt_Qual= pd.Categorical(data_raw.Bsmt_Qual,\
-								categories=['No_Basement','Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Bsmt_Qual, sort=True)
-	data['Bsmt_Qual']=labels
+	while 1:
 
-	#Bsmt_Cond
-	ordinals_Bsmt_Cond= pd.Categorical(data_raw.Bsmt_Cond,\
-								categories=['No_Basement','Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Bsmt_Cond, sort=True)
-	data['Bsmt_Cond']=labels
+		tmp_len = random.randint(round(1*total_feature_length/4),round(3*total_feature_length/4))
+		rdm_features = np.random.choice(total_feature_list, size=tmp_len, replace=False, p=weights_p).ravel()
+		numeric_subset = [str(f) for f in rdm_features if f in post_process_numeric_features]
+		nominal_subset = [str(f) for f in rdm_features if f in post_process_categorical_features]
+		tmp = build_and_score_model(func, numeric_features=numeric_subset, categorical_features=nominal_subset)
 
-	#Heating_QC
-	ordinals_Heating_QC= pd.Categorical(data_raw.Heating_QC,\
-								categories=['Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Heating_QC, sort=True)
-	data['Heating_QC']=labels
-
-	#Kitchen_Qual
-	ordinals_Kitchen_Qual= pd.Categorical(data_raw.Kitchen_Qual,\
-								categories=['Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Kitchen_Qual, sort=True)
-	data['Kitchen_Qual']=labels
-
-	#Fireplace_Qu
-	ordinals_Fireplace_Qu= pd.Categorical(data_raw.Fireplace_Qu,\
-								categories=['No_Fireplace','Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Fireplace_Qu, sort=True)
-	data['Fireplace_Qu']=labels
-
-	#Garage_Qual
-	ordinals_Garage_Qual= pd.Categorical(data_raw.Garage_Qual,\
-								categories=['No_Garage','Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Garage_Qual, sort=True)
-	data['Garage_Qual']=labels
-
-	#Garage_Cond
-	ordinals_Garage_Cond= pd.Categorical(data_raw.Garage_Cond,\
-								categories=['No_Garage','Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Garage_Cond, sort=True)
-	data['Garage_Cond']=labels
-
-	#Pool_QC
-	ordinals_Pool_QC= pd.Categorical(data_raw.Pool_QC,\
-								categories=['No_Pool','Poor','Typical','Fair','Good','Excellent'],\
-								ordered=True)
-	labels, unique = pd.factorize(ordinals_Pool_QC, sort=True)
-	data['Pool_QC']=labels
-
-	#### Boolean features
-	data_raw.Central_Air.replace(('Y','N'),(1,0), inplace=True) #https://stackoverflow.com/q/40901770
-	data['Central_Air'] = data_raw.Central_Air
-
-	return data
-
-xtest = import_and_clean_housing_data('data/X_test.csv')
-dtrain = import_and_clean_housing_data('data/D_train.csv')
-
-sample_raw = pd.read_csv('data/sample.csv', index_col="index")
-
-sample = pd.Series(sample_raw.columns[np.where(sample_raw!=0)[1]]) #https://stackoverflow.com/a/51275990
+		if tmp<best:
+			best=tmp
+			print("==========")
+			print("New best prediction using "+str(tmp_len)+" features.")
+			print("Multiclass log loss score on training set : "+str(best))
+			print(numeric_subset+nominal_subset)
+			os.rename('output/tmp.csv', 'output/current_best_rdm.csv')
 
 from sklearn.linear_model import LogisticRegression
-lr = LogisticRegression(solver='lbfgs', max_iter=10000)
-lr.fit(xtest, sample)
-
-
+from sklearn.ensemble import RandomForestClassifier, BaggingClassifier
 from sklearn.naive_bayes import GaussianNB
-naive_b = GaussianNB()
-naive_b.fit(xtest, sample)
 
-predicted_proba = naive_b.predict_proba(dtrain)
-
-csv = pd.DataFrame(predicted_proba, index=dtrain.index, columns=['A','B','C','D','E'])
-csv.to_csv('output/test.csv')
+test_random_weighted_combinations(BaggingClassifier(RandomForestClassifier(n_estimators=60, n_jobs=8), n_estimators=60, n_jobs=8))
